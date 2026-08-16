@@ -1,0 +1,8 @@
+# Virtual environment
+.venv/
+
+# Transaction / data files
+*.csv
+
+# Claude
+PLAN.md
