@@ -3,6 +3,8 @@
 
 # Transaction / data files
 *.csv
+llm_cache.json
+seed_keywords.json
 
 # Claude
 PLAN.md
