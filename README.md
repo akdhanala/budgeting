@@ -83,3 +83,8 @@ Defaults (omit the flags to use these):
 | `--seed-file` | `seed_keywords.json` |
 | `--cache-file` | `llm_cache.json` |
 | `--output-csv` | `categorized_output.csv` |
+
+
+## Next Steps
+
+With this latest commit, you'll have noticed I added a script that's not housed under the traditional /scripts folder. This is intentional. The purpose of this project is for me to get acquainted with LangChain, a widely used framework meant to be used when creating workflows. And what better starting point than your classic Hello World? The north star here is to convert the consolidate and categorize scripts into nodes that'll present in this graph. Let's keep building!
