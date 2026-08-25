@@ -1,26 +1,33 @@
+from typing import TypedDict
 import argparse
 
 import pandas as pd
+from langgraph.graph import START, END, StateGraph
+
 
 TARGET_COLUMNS = ["Date", "Description", "Category", "Amount", "Type / Extended Notes"]
 
 
+class BudgetState(TypedDict, total=False):
+    amex_path: str
+    chase_path: str
+    consolidated_df: pd.DataFrame
+    consolidated_rows: int
+
+
 def _strip_strings(df: pd.DataFrame) -> pd.DataFrame:
-    """Strip whitespace from column names and string values."""
     df.columns = df.columns.str.strip()
-    for col in df.select_dtypes(include=["object"]).columns:
+    for col in df.select_dtypes(include=["string"]).columns:
         df[col] = df[col].apply(lambda v: v.strip() if isinstance(v, str) else v)
     return df
 
 
 def _clean_amount(series: pd.Series) -> pd.Series:
-    """Remove currency symbols/commas and coerce to float."""
     cleaned = series.astype(str).str.replace(r"[\$,]", "", regex=True).str.strip()
     return pd.to_numeric(cleaned, errors="coerce")
 
 
 def _combine_notes(df: pd.DataFrame, cols: list[str], sep: str = " | ") -> pd.Series:
-    """Combine secondary fields into one string, omitting NaN / empty values."""
     def _row(row):
         parts = []
         for c in cols:
@@ -37,10 +44,8 @@ def _combine_notes(df: pd.DataFrame, cols: list[str], sep: str = " | ") -> pd.Se
     return df.apply(_row, axis=1)
 
 
-def _normalize_amex(path: str) -> pd.DataFrame:
-    df = pd.read_csv(path)
+def _normalize_amex_df(df: pd.DataFrame) -> pd.DataFrame:
     df = _strip_strings(df)
-
     out = pd.DataFrame()
     out["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
     out["Description"] = df["Description"] if "Description" in df.columns else ""
@@ -52,10 +57,8 @@ def _normalize_amex(path: str) -> pd.DataFrame:
     return out[TARGET_COLUMNS]
 
 
-def _normalize_chase(path: str) -> pd.DataFrame:
-    df = pd.read_csv(path)
+def _normalize_chase_df(df: pd.DataFrame) -> pd.DataFrame:
     df = _strip_strings(df)
-
     out = pd.DataFrame()
     out["Date"] = pd.to_datetime(df["Transaction Date"], errors="coerce").dt.strftime("%Y-%m-%d")
     out["Description"] = df["Description"] if "Description" in df.columns else ""
@@ -65,37 +68,48 @@ def _normalize_chase(path: str) -> pd.DataFrame:
     return out[TARGET_COLUMNS]
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Consolidate AMEX and Chase CSVs.")
-    parser.add_argument("amex_file", help="Path to AMEX CSV file")
-    parser.add_argument("chase_file", help="Path to Chase CSV file")
-    parser.add_argument(
-        "-o", "--output",
-        dest="output_file",
-        default="consolidated_transactions.csv",
-        help="Output CSV path (default: consolidated_transactions.csv)",
-    )
-    args = parser.parse_args()
-
-    amex = _normalize_amex(args.amex_file)
-    chase = _normalize_chase(args.chase_file)
-
-    amex_count = len(amex)
-    chase_count = len(chase)
-
+def _combine_frames(amex: pd.DataFrame, chase: pd.DataFrame) -> pd.DataFrame:
     combined = pd.concat([amex, chase], ignore_index=True)
     combined["Date"] = pd.to_datetime(combined["Date"], errors="coerce")
     combined = combined.sort_values(by="Date", ascending=False)
     combined["Date"] = combined["Date"].dt.strftime("%Y-%m-%d")
-    combined = combined.drop_duplicates()
-    combined = combined[TARGET_COLUMNS]
+    return combined[TARGET_COLUMNS]
 
-    combined.to_csv(args.output_file, index=False)
 
-    print(f"AMEX rows:        {amex_count}")
-    print(f"Chase rows:       {chase_count}")
-    print(f"Consolidated rows: {len(combined)} (duplicates removed: {amex_count + chase_count - len(combined)})")
-    print(f"Output written to: {args.output_file}")
+def consolidate_node(state: BudgetState) -> dict:
+    amex_raw = pd.read_csv(state["amex_path"])
+    chase_raw = pd.read_csv(state["chase_path"])
+    amex = _normalize_amex_df(amex_raw)
+    chase = _normalize_chase_df(chase_raw)
+    combined = _combine_frames(amex, chase)
+    return {
+        "consolidated_df": combined,
+        "consolidated_rows": len(combined),
+    }
+
+
+graph = StateGraph(BudgetState)
+graph.add_node("consolidate", consolidate_node)
+graph.add_edge(START, "consolidate")
+graph.add_edge("consolidate", END)
+graph = graph.compile()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run consolidate graph")
+    parser.add_argument("amex_file", nargs="?", help="Path to AMEX CSV file")
+    parser.add_argument("chase_file", nargs="?", help="Path to Chase CSV file")
+    args = parser.parse_args()
+
+    amex_path = args.amex_file or input("AMEX CSV path: ").strip()
+    chase_path = args.chase_file or input("Chase CSV path: ").strip()
+
+    if not amex_path or not chase_path:
+        parser.error("Both AMEX and Chase CSV paths are required.")
+
+    print(graph.get_graph().draw_ascii())
+    result = graph.invoke({"amex_path": amex_path, "chase_path": chase_path})
+    print(f"Consolidated rows: {result['consolidated_rows']}")
 
 
 if __name__ == "__main__":
