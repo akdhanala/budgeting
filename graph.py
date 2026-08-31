@@ -1,8 +1,11 @@
+import re
 from typing import TypedDict
 import argparse
 
 import pandas as pd
 from langgraph.graph import START, END, StateGraph
+
+_WS_RE = re.compile(r"\s+")
 
 
 TARGET_COLUMNS = ["Date", "Description", "Category", "Amount", "Type / Extended Notes"]
@@ -16,9 +19,15 @@ class BudgetState(TypedDict, total=False):
 
 
 def _strip_strings(df: pd.DataFrame) -> pd.DataFrame:
-    df.columns = df.columns.str.strip()
-    for col in df.select_dtypes(include=["string"]).columns:
-        df[col] = df[col].apply(lambda v: v.strip() if isinstance(v, str) else v)
+    df.columns = df.columns.str.strip().str.replace(r"\s+", " ", regex=True)
+    for col in df.select_dtypes(include=["object", "string"]).columns:
+        df[col] = df[col].apply(
+            lambda v: _WS_RE.sub(" ", v.strip()) if isinstance(v, str) else v
+        )
+    if "Description" in df.columns:
+        df["Description"] = df["Description"].apply(
+            lambda v: v.lower() if isinstance(v, str) else v
+        )
     return df
 
 
