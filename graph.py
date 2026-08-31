@@ -16,6 +16,7 @@ class BudgetState(TypedDict, total=False):
     chase_path: str
     consolidated_df: pd.DataFrame
     consolidated_rows: int
+    dump_path: str
 
 
 def _strip_strings(df: pd.DataFrame) -> pd.DataFrame:
@@ -97,10 +98,21 @@ def consolidate_node(state: BudgetState) -> dict:
     }
 
 
+def dump_node(state: BudgetState) -> dict:
+    df = state.get("consolidated_df")
+    if df is None or df.empty:
+        return {}
+    path = state.get("dump_path") or "/tmp/consolidated.csv"
+    df.to_csv(path, index=False)
+    return {"dump_path": path}
+
+
 graph = StateGraph(BudgetState)
 graph.add_node("consolidate", consolidate_node)
+graph.add_node("dump", dump_node)
 graph.add_edge(START, "consolidate")
-graph.add_edge("consolidate", END)
+graph.add_edge("consolidate", "dump")
+graph.add_edge("dump", END)
 graph = graph.compile()
 
 
@@ -119,6 +131,8 @@ def main():
     print(graph.get_graph().draw_ascii())
     result = graph.invoke({"amex_path": amex_path, "chase_path": chase_path})
     print(f"Consolidated rows: {result['consolidated_rows']}")
+    if result.get("dump_path"):
+        print(f"Wrote CSV to: {result['dump_path']}")
 
 
 if __name__ == "__main__":
